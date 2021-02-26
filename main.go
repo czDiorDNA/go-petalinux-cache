@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -11,6 +10,7 @@ import (
 
 	"github.com/gocolly/colly"
 	"github.com/gocolly/colly/extensions"
+	"github.com/gocolly/redisstorage"
 )
 
 const Version = "rel-v2018.2"
@@ -39,10 +39,21 @@ func IsDir(file string) bool {
 
 func main() {
 	c := colly.NewCollector(func(collector *colly.Collector) {
+		collector.Async = true
 		collector.AllowURLRevisit = true
 		collector.SetRequestTimeout(100 * time.Second)
 		extensions.RandomUserAgent(collector)
 	})
+
+	storage := &redisstorage.Storage{
+		Address:  "127.0.0.1:6379",
+		Password: "",
+		DB:       0,
+		Prefix:   "petalinux-cache-" + Version,
+	}
+
+	c.SetStorage(storage)
+
 	downC := c.Clone()
 	c.OnHTML("#indexlist", func(e *colly.HTMLElement) {
 		e.ForEach("tr", func(index int, child *colly.HTMLElement) {
@@ -64,12 +75,12 @@ func main() {
 		})
 	})
 	c.OnError(func(resp *colly.Response, err error) {
-		fmt.Println("err: ", resp.Request.URL.String(), err)
 		resp.Request.Visit(resp.Request.URL.String())
 	})
 
 	downC.OnResponse(func(r *colly.Response) {
 		filePath := strings.Replace(r.Request.URL.String(), BaseURL, "", -1)
+		filePath = strings.Replace(filePath, ":", "_", -1)
 		filePath = path.Join(GetRootDir(), filePath)
 		if !IsDir(path.Dir(filePath)) {
 			os.MkdirAll(path.Dir(filePath), 0777)
@@ -89,4 +100,7 @@ func main() {
 	})
 
 	c.Visit(BaseURL)
+
+	c.Wait()
+	downC.Wait()
 }
